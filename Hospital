@@ -1,0 +1,131 @@
+
+### Industry Project Workflow Example
+## Step 1. Ingest data
+general_payment <- data.table::fread("OP_DTL_GNRL_PGYR2017_P06302020.csv", showProgress = TRUE)
+medicare_charges <- data.table::fread("MEDICARE_PROVIDER_CHARGE_INPATIENT_DRGALL_FY2017.CSV", showProgress = TRUE)
+
+## Step 2. Transform and merge data
+
+
+# Step 2a. Create aggregate variables by hospital in general payment
+# The following code only creates 2 variables, you will need to come up with a few more on your own 
+# but you can use the same code syntax as I have below.
+# The idea is that you want to create a data frame like this:
+# Hospital Name Total_Number_of_Drug_Companies Total_PayMent_From_Third_Party
+# ABC           100                             1343.0
+# DEF           200                             243243.0
+
+library(dplyr)
+general_payment <- general_payment[general_payment$Teaching_Hospital_Name != "",]
+general_payment_agg <- general_payment %>% 
+  group_by(Teaching_Hospital_Name) %>%
+  summarize(
+    total_number_drug_companies = n_distinct(Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1, na.rm = TRUE),
+    total_payment = sum(Total_Amount_of_Payment_USDollars))
+View(general_payment_agg)
+# Step 2b. Join the two datasets on HOSPITAL_NAME
+final_data <- merge(medicare_charges, general_payment_agg, 
+                    by.x = "Provider Name", by.y = "Teaching_Hospital_Name",
+                    all.x = TRUE, all.y = FALSE) # we want to include all data from medicare but not all from general payment
+View(final_data)
+# Step 2c. Clean final data, create new Y variable
+# There are multiple ways you can approach this as I mentioned before. 
+# Option 1. Create a new variable that measures deviation in hospital charges from procedure-wide average cost
+# Option 2. Create a new variable that measures deviation in percentage in hospital charges from procedure-wide average cost
+# The following code showcases option 1
+
+####Remove the NA's to clear the data.
+final_data1 <- na.omit(final_data)
+
+# you need to sum all charges to get total procedure charges
+
+final_data2 <- final_data1 %>%
+  mutate(total_charges = `Average Covered Charges` + `Average Medicare Payments` + `Average Total Payments`) %>%
+  group_by(`DRG Definition`) %>%
+  mutate(average_procedure_cost = mean(total_charges)) %>%
+  ungroup() %>%
+  mutate(procedure_cost_deviation = total_charges - average_procedure_cost)
+View(final_data2)
+
+
+## Step 3. Visualilzation
+# The goal of the visualization is to demonstrate potential relationship 
+# between some predictor variablle and the variable we want to predict
+
+library(ggplot2)
+ggplot(final_data2, 
+       aes(x=final_data2$total_number_drug_companies, 
+           y=final_data2$procedure_cost_deviation)) +
+  geom_point()
+
+# plot 2
+ggplot(final_data2, 
+       aes(x=final_data2$'Average Covered Charges', 
+           'Average Total Payments', 
+           'Average Medicare Payments',
+           y=final_data2$'average_procedure_cost')) +
+  geom_point()
+
+##Second Visualization## 
+ggplot(final_data2,
+       aes(x=final_data2$`Provider State`, y=final_data2$procedure_cost_deviation)) +
+  geom_point()
+
+## Correlation Map##
+library("Hmisc")
+library(corrplot)
+
+
+## Removed non numerical data from final_data2
+numericdata <- final_data2[,c(-1 : -9)] 
+
+## create a correlation matrix 
+corralation_matrix <- cor(numericdata)
+View(corralation_matrix)
+
+## Create a Heatmap
+library(reshape2)
+melted_correlation <- melt(corralation_matrix)
+head(melted_correlation)
+ggplot(data =  melted_correlation, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+
+
+## Step 4. Build models
+
+## KNN###
+
+# Split the data into training data and test data. 
+## Use 80% of the data for training and 20% of the data for test.
+# selects randomly 80% of the data
+traindata <- sample(1:nrow(final_data2), 0.8*nrow(final_data2))
+testdata <- setdiff(1:nrow(final_data2), traindata)
+
+# normalized the data after split
+
+normaldata <- function(x) { (x -min(x))/(max(x)-min(x))}
+
+normalhospital <- as.data.frame(lapply(final_data2[,c(10,11,12)],
+                                       normaldata))
+summary(normalhospital)
+
+## extract training data set
+hospital_train <- normalhospital[traindata,]
+
+## extract testing set
+hospital_test <- normalhospital[-traindata,]
+
+## data set with target
+
+procedure <- final_data2[traindata, c("average_procedure_cost")] 
+proceduretest <- final_data2[-traindata, c("average_procedure_cost")]
+
+
+library(class)
+hospitalknn <- knn(hospital_train, hospital_test, cl = procedure$average_procedure_cost, k=3)
+accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) *100} 
+accuracy(hospitalknn) # something wrong 
+
+# Confusion Matrix ## Can't do this
+cm <- table(hospital_test[,16],hospitalknn)
+colnames(hospital_train)

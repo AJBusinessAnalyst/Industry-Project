@@ -122,10 +122,19 @@ proceduretest <- final_data2[-traindata, c("average_procedure_cost")]
 
 
 library(class)
-hospitalknn <- knn(hospital_train, hospital_test, cl = procedure$average_procedure_cost, k=3)
-accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) *100} 
-accuracy(hospitalknn) # something wrong 
+library(FNN)
 
-# Confusion Matrix ## Can't do this
-cm <- table(hospital_test[,16],hospitalknn)
-colnames(hospital_train)
+#crete the model
+hospitalknn <- knn.reg(hospital_train, hospital_test, 
+                      procedure$average_procedure_cost, k=3)
+
+#KNN does precidtions already, any other model needs: predicted_cost <- predict(hospitalknn, hospital_test)
+
+library(Metrics)
+
+# compare the error
+
+# error <- as.numeric(hospitalknn$pred) - proceduretest$average_procedure_cost
+# first four  -44380.78729    1163.40106    7551.46361   -8854.65935
+rmse(proceduretest$average_procedure_cost,as.numeric (hospitalknn$pred))
+# 37912.89
